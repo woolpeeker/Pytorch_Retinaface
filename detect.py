@@ -11,6 +11,7 @@ import cv2
 from models.retinaface import RetinaFace
 from utils.box_utils import decode, decode_landm
 import time
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description='Retinaface')
 
@@ -18,12 +19,14 @@ parser.add_argument('-m', '--trained_model', default='./weights/Resnet50_Final.p
                     type=str, help='Trained state_dict file path to open')
 parser.add_argument('--network', default='resnet50', help='Backbone network mobile0.25 or resnet50')
 parser.add_argument('--cpu', action="store_true", default=False, help='Use cpu inference')
-parser.add_argument('--confidence_threshold', default=0.02, type=float, help='confidence_threshold')
+parser.add_argument('--confidence_threshold', default=0.5, type=float, help='confidence_threshold')
 parser.add_argument('--top_k', default=5000, type=int, help='top_k')
 parser.add_argument('--nms_threshold', default=0.4, type=float, help='nms_threshold')
 parser.add_argument('--keep_top_k', default=750, type=int, help='keep_top_k')
-parser.add_argument('-s', '--save_image', action="store_true", default=True, help='show detection results')
-parser.add_argument('--vis_thres', default=0.6, type=float, help='visualization_threshold')
+parser.add_argument('--vis_scores', action='store_true', help='visual score')
+parser.add_argument('--vis_landmarks', action='store_true', help='visual landmark')
+parser.add_argument('--save_dir', default="None", type=str, help='visualize save directory')
+parser.add_argument('images', type=str, nargs='+', help='input image_list')
 args = parser.parse_args()
 
 
@@ -62,6 +65,19 @@ def load_model(model, pretrained_path, load_to_cpu):
     model.load_state_dict(pretrained_dict, strict=False)
     return model
 
+def get_inp_images():
+    out = []
+    for i, img in enumerate(args.images):
+        img = Path(img)
+        if '*' in str(img):
+            d = img.parent
+            out.extend(list(d.glob(img.name)))
+        else:
+            out.append(img)
+    for img in out:
+        if not img.is_file():
+            raise FileNotFoundError(f'{img} not found')
+    return out
 
 if __name__ == '__main__':
     torch.set_grad_enabled(False)
@@ -70,21 +86,23 @@ if __name__ == '__main__':
         cfg = cfg_mnet
     elif args.network == "resnet50":
         cfg = cfg_re50
+    cfg['pretrain'] = False
     # net and model
     net = RetinaFace(cfg=cfg, phase = 'test')
     net = load_model(net, args.trained_model, args.cpu)
     net.eval()
     print('Finished loading model!')
-    print(net)
     cudnn.benchmark = True
     device = torch.device("cpu" if args.cpu else "cuda")
     net = net.to(device)
 
     resize = 1
 
+    image_paths = get_inp_images()
+
     # testing begin
-    for i in range(100):
-        image_path = "./curve/test.jpg"
+    for i, img_path in enumerate(image_paths):
+        image_path = str(img_path)
         img_raw = cv2.imread(image_path, cv2.IMREAD_COLOR)
 
         img = np.float32(img_raw)
@@ -143,26 +161,29 @@ if __name__ == '__main__':
         dets = np.concatenate((dets, landms), axis=1)
 
         # show image
-        if args.save_image:
+        if args.save_dir != 'None':
+            Path(args.save_dir).mkdir(parents=True, exist_ok=True)
+            out_path = Path(args.save_dir) / f'{i:04d}.jpg'
             for b in dets:
-                if b[4] < args.vis_thres:
+                if b[4] < args.confidence_threshold:
                     continue
                 text = "{:.4f}".format(b[4])
                 b = list(map(int, b))
                 cv2.rectangle(img_raw, (b[0], b[1]), (b[2], b[3]), (0, 0, 255), 2)
                 cx = b[0]
                 cy = b[1] + 12
-                cv2.putText(img_raw, text, (cx, cy),
-                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255))
+                if args.vis_scores:
+                    cv2.putText(img_raw, text, (cx, cy),
+                                cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255))
 
                 # landms
-                cv2.circle(img_raw, (b[5], b[6]), 1, (0, 0, 255), 4)
-                cv2.circle(img_raw, (b[7], b[8]), 1, (0, 255, 255), 4)
-                cv2.circle(img_raw, (b[9], b[10]), 1, (255, 0, 255), 4)
-                cv2.circle(img_raw, (b[11], b[12]), 1, (0, 255, 0), 4)
-                cv2.circle(img_raw, (b[13], b[14]), 1, (255, 0, 0), 4)
+                if args.vis_landmarks:
+                    cv2.circle(img_raw, (b[5], b[6]), 1, (0, 0, 255), 4)
+                    cv2.circle(img_raw, (b[7], b[8]), 1, (0, 255, 255), 4)
+                    cv2.circle(img_raw, (b[9], b[10]), 1, (255, 0, 255), 4)
+                    cv2.circle(img_raw, (b[11], b[12]), 1, (0, 255, 0), 4)
+                    cv2.circle(img_raw, (b[13], b[14]), 1, (255, 0, 0), 4)
             # save image
-
-            name = "test.jpg"
-            cv2.imwrite(name, img_raw)
+            print(f'save {out_path.name} {img_path}')
+            cv2.imwrite(str(out_path), img_raw)
 
