@@ -26,6 +26,7 @@ parser.add_argument('--keep_top_k', default=750, type=int, help='keep_top_k')
 parser.add_argument('--vis_scores', action='store_true', help='visual score')
 parser.add_argument('--vis_landmarks', action='store_true', help='visual landmark')
 parser.add_argument('--save_dir', default="None", type=str, help='visualize save directory')
+parser.add_argument('--inpsize', default="1920x1080", type=str, help='like 1920x1080')
 parser.add_argument('images', type=str, nargs='+', help='input image_list')
 args = parser.parse_args()
 
@@ -96,7 +97,8 @@ if __name__ == '__main__':
     device = torch.device("cpu" if args.cpu else "cuda")
     net = net.to(device)
 
-    resize = 1
+    inpsize = args.inpsize
+    inpsize = [int(x) for x in inpsize.split('x')]
 
     image_paths = get_inp_images()
 
@@ -105,9 +107,13 @@ if __name__ == '__main__':
         image_path = str(img_path)
         img_raw = cv2.imread(image_path, cv2.IMREAD_COLOR)
 
-        img = np.float32(img_raw)
+        im_height, im_width, _ = img_raw.shape
+        resize = min(inpsize[0] / im_width, inpsize[1] / im_height)
 
+        img = cv2.resize(img_raw, (0,0), fx=resize, fy=resize)
+        img = np.float32(img)
         im_height, im_width, _ = img.shape
+
         scale = torch.Tensor([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
         img -= (104, 117, 123)
         img = img.transpose(2, 0, 1)
